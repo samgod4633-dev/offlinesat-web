@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="OfflineSat">
+  <meta name="theme-color" content="#0b1a14">
+  <title>OfflineSat</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" crossorigin="anonymous">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="map" aria-label="Satellite map"></div>
+
+  <div id="top">
+    <button id="status" class="card" type="button" aria-label="GPS status, tap to copy coordinates">
+      <span id="st-lat">Waiting for GPS…</span>
+      <span id="st-lon"></span>
+      <span class="st-row"><span id="st-alt"></span><span id="st-acc"></span></span>
+      <span class="st-row muted"><span id="st-zoom"></span><span id="st-net"></span></span>
+    </button>
+    <div id="banner" class="card" hidden>
+      <span>Location is blocked. On iPhone: Settings › Privacy &amp; Security › Location Services › Safari Websites › While Using the App.</span>
+      <button id="banner-retry" type="button">Try again</button>
+    </div>
+    <button id="pill" class="card" type="button" hidden>
+      <progress id="pill-bar" max="1" value="0"></progress>
+      <span id="pill-text">Saving tiles</span>
+    </button>
+  </div>
+
+  <div id="controls">
+    <button id="btn-follow" class="ctl" type="button" aria-label="Follow me" aria-pressed="false">
+      <svg viewBox="0 0 24 24"><path d="M12 2 4.5 20.3l.7.7L12 18l6.8 3 .7-.7z"/></svg>
+    </button>
+    <button id="btn-center" class="ctl" type="button" aria-label="Center on my location">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/></svg>
+    </button>
+    <div class="ctl-group">
+      <button id="btn-zoom-in" class="ctl flat" type="button" aria-label="Zoom in">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      </button>
+      <button id="btn-zoom-out" class="ctl flat" type="button" aria-label="Zoom out">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"/></svg>
+      </button>
+    </div>
+    <button id="btn-offline" class="ctl" type="button" aria-label="Offline maps">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M4 17v3h16v-3"/></svg>
+    </button>
+  </div>
+
+  <div id="attribution"></div>
+  <div id="toast" role="status" aria-live="polite"></div>
+
+  <div id="sheet-backdrop" hidden></div>
+  <section id="sheet" aria-label="Offline maps" hidden>
+    <header class="sheet-header">
+      <h2>Offline Maps</h2>
+      <button id="sheet-close" type="button">Done</button>
+    </header>
+    <div class="sheet-body">
+      <div class="group">
+        <h3>Download visible area</h3>
+        <div class="row">
+          <span>Min zoom</span>
+          <span class="stepper">
+            <button type="button" data-step="min" data-delta="-1" aria-label="Lower min zoom">−</button>
+            <output id="min-z">12</output>
+            <button type="button" data-step="min" data-delta="1" aria-label="Raise min zoom">+</button>
+          </span>
+        </div>
+        <div class="row">
+          <span>Max zoom</span>
+          <span class="stepper">
+            <button type="button" data-step="max" data-delta="-1" aria-label="Lower max zoom">−</button>
+            <output id="max-z">15</output>
+            <button type="button" data-step="max" data-delta="1" aria-label="Raise max zoom">+</button>
+          </span>
+        </div>
+        <div class="row"><span>Estimate</span><span id="estimate"></span></div>
+        <div id="dl-progress" hidden>
+          <progress id="dl-bar" max="1" value="0"></progress>
+          <div id="dl-text" class="muted small"></div>
+        </div>
+        <button id="dl-start" class="wide primary" type="button">Download visible area</button>
+        <button id="dl-cancel" class="wide danger" type="button" hidden>Cancel download</button>
+        <p id="dl-result" class="muted small"></p>
+        <p class="footnote">Use Wi-Fi: big areas can use a lot of data. Keep the app open until it finishes. Limit 25,000 tiles per download; tiles you already have are skipped.</p>
+      </div>
+
+      <div class="group">
+        <h3>Saved tiles</h3>
+        <div class="row"><span>Stored</span><span id="stored">…</span></div>
+        <button id="import-btn" class="wide" type="button">Import MBTiles…</button>
+        <input id="import-file" type="file" multiple hidden>
+        <p id="import-status" class="muted small"></p>
+        <button id="clear-btn" class="wide danger" type="button">Clear all saved tiles</button>
+        <p class="footnote">Raster .mbtiles files (for example from QGIS or MOBAC) are merged into your saved tiles. Files over ~300 MB may be too big for the phone's memory.</p>
+      </div>
+
+      <div class="group">
+        <h3>Tile source</h3>
+        <textarea id="template" rows="3" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Tile URL template"></textarea>
+        <button id="reset-template" class="wide" type="button">Reset to Esri World Imagery</button>
+        <label class="row">
+          <span>Save tiles while browsing</span>
+          <input id="save-browsing" type="checkbox">
+        </label>
+        <p class="footnote">Placeholders: {z} {x} {y}, or {-y} for TMS. Check your imagery provider's terms before saving tiles for offline use.</p>
+      </div>
+    </div>
+  </section>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js" crossorigin="anonymous"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
