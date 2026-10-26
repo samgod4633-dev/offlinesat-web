@@ -1,4 +1,5 @@
 /* global L */
+import { initAreaSelect } from './areaSelect.js';
 import { LocationTracker } from './location.js';
 import { OfflineTileLayer } from './offlineLayer.js';
 import { settings } from './settings.js';
@@ -199,6 +200,7 @@ const sheet = initOfflineSheet({
     renderAttribution();
     tileLayer.redraw();
   },
+  onSelectArea: () => areaSelect.enter(),
   onDownloadProgress: (fraction) => {
     $('pill').hidden = fraction == null;
     if (fraction != null) {
@@ -206,6 +208,12 @@ const sheet = initOfflineSheet({
       $('pill-text').textContent = `Saving tiles ${Math.round(fraction * 100)}%`;
     }
   },
+});
+
+const areaSelect = initAreaSelect({
+  map,
+  runDownload: sheet.runDownload,
+  isDownloading: sheet.isDownloading,
 });
 
 $('btn-offline').addEventListener('click', sheet.open);

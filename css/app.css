@@ -169,6 +169,38 @@ progress::-moz-progress-bar { background: var(--blue); }
 .ctl.flat { background: transparent; border: 0; box-shadow: none; border-radius: 0; -webkit-backdrop-filter: none; backdrop-filter: none; }
 .ctl.flat + .ctl.flat { border-top: 1px solid var(--line); }
 
+/* Square selection mode */
+#select-bar {
+  position: fixed;
+  z-index: 1500;
+  left: calc(var(--safe-left) + 10px);
+  right: calc(var(--safe-right) + 10px);
+  bottom: calc(var(--safe-bottom) + 10px);
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 4px 14px 12px;
+  background: rgba(27, 32, 30, 0.92);
+}
+#sel-hint { margin: 8px 0 2px; font-size: 13px; color: var(--muted); }
+#sel-estimate { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+#sel-estimate.over { color: var(--poor); }
+#sel-max { min-width: 36px; }
+.sel-actions { display: flex; gap: 8px; margin-top: 10px; }
+.sel-actions button {
+  flex: 1;
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.12);
+  font-weight: 600;
+}
+.sel-actions button.primary { flex: 1.4; background: var(--blue); }
+.sel-actions button:disabled { opacity: 0.4; }
+body.selecting #btn-offline,
+body.selecting #attribution,
+body.selecting .leaflet-bottom { display: none; }
+body.selecting #map { cursor: pointer; }
+
 #attribution {
   position: fixed;
   z-index: 900;

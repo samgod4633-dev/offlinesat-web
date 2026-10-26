@@ -1,6 +1,6 @@
 // App-shell cache so OfflineSat opens with no signal. Map tiles are NOT handled here;
 // they live in IndexedDB (see js/tileStore.js). Bump VERSION when shipping changes.
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = `offlinesat-${VERSION}`;
 
 const APP_FILES = [
@@ -9,6 +9,7 @@ const APP_FILES = [
   'manifest.webmanifest',
   'css/app.css',
   'js/app.js',
+  'js/areaSelect.js',
   'js/settings.js',
   'js/tileMath.js',
   'js/tileStore.js',
@@ -38,7 +39,11 @@ const CDN_HOSTS = ['cdnjs.cloudflare.com', 'cdn.jsdelivr.net'];
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
-    await cache.addAll([...APP_FILES, ...CDN_FILES.map((url) => new Request(url, { mode: 'cors' }))]);
+    // cache: 'reload' skips the browser's HTTP cache so a new version never precaches stale files.
+    await cache.addAll([
+      ...APP_FILES.map((url) => new Request(url, { cache: 'reload' })),
+      ...CDN_FILES.map((url) => new Request(url, { mode: 'cors' })),
+    ]);
     await Promise.allSettled(OPTIONAL_FILES.map((url) => cache.add(new Request(url, { mode: 'cors' }))));
     await self.skipWaiting();
   })());

@@ -36,7 +36,7 @@ async function requestWakeLock() {
 }
 
 /** Offline Maps sheet: area download, MBTiles import, storage, tile source. */
-export function initOfflineSheet({ map, onTilesChanged, onSourceChanged, onDownloadProgress }) {
+export function initOfflineSheet({ map, onTilesChanged, onSourceChanged, onDownloadProgress, onSelectArea }) {
   let minZoom = 12;
   let maxZoom = 15;
   let controller = null;
@@ -98,6 +98,10 @@ export function initOfflineSheet({ map, onTilesChanged, onSourceChanged, onDownl
   }
 
   $('sheet-close').addEventListener('click', close);
+  $('select-area-btn').addEventListener('click', () => {
+    close();
+    onSelectArea();
+  });
   $('sheet-backdrop').addEventListener('click', close);
 
   for (const button of document.querySelectorAll('[data-step]')) {
@@ -109,17 +113,30 @@ export function initOfflineSheet({ map, onTilesChanged, onSourceChanged, onDownl
     });
   }
 
-  // --- Area download ---
-  $('dl-start').addEventListener('click', async () => {
-    const bounds = visibleBounds();
-    const count = tileCount(bounds, minZoom, maxZoom);
-    if (count === 0 || count > MAX_TILES) return;
+  // --- Downloads (visible area here; hand-picked squares via areaSelect.js) ---
+
+  /** Asks for confirmation, then downloads in the background. Returns true if it started. */
+  function runDownload(tiles) {
+    const count = tiles.length;
+    if (controller || count === 0 || count > MAX_TILES) return false;
     const ok = window.confirm(
       `Download ${count.toLocaleString()} tiles (about ${formatBytes(count * EST_BYTES_PER_TILE)})?\n\n` +
       'Use Wi-Fi, and keep the app open until it finishes.',
     );
-    if (!ok) return;
+    if (!ok) return false;
+    performDownload(tiles);
+    return true;
+  }
 
+  $('dl-start').addEventListener('click', () => {
+    const bounds = visibleBounds();
+    const count = tileCount(bounds, minZoom, maxZoom);
+    if (count === 0 || count > MAX_TILES) return;
+    runDownload(Array.from(tilesIn(bounds, minZoom, maxZoom)));
+  });
+
+  async function performDownload(tiles) {
+    const count = tiles.length;
     navigator.storage?.persist?.().catch(() => {});
     controller = new AbortController();
     const wakeLock = await requestWakeLock();
@@ -138,7 +155,7 @@ export function initOfflineSheet({ map, onTilesChanged, onSourceChanged, onDownl
     };
     showProgress({ total: count, processed: 0, failed: 0, bytes: 0 });
 
-    const result = await downloadTiles(Array.from(tilesIn(bounds, minZoom, maxZoom)), {
+    const result = await downloadTiles(tiles, {
       signal: controller.signal,
       onProgress: showProgress,
     });
@@ -157,7 +174,7 @@ export function initOfflineSheet({ map, onTilesChanged, onSourceChanged, onDownl
     render();
     refreshStorage();
     onTilesChanged();
-  });
+  }
 
   $('dl-cancel').addEventListener('click', () => controller?.abort());
 
@@ -220,5 +237,5 @@ export function initOfflineSheet({ map, onTilesChanged, onSourceChanged, onDownl
     settings.saveWhileBrowsing = event.target.checked;
   });
 
-  return { open, close };
+  return { open, close, runDownload, isDownloading: () => Boolean(controller) };
 }

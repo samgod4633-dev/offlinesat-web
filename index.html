@@ -55,6 +55,24 @@
     </button>
   </div>
 
+  <div id="select-bar" class="card" hidden>
+    <p id="sel-hint">Tap squares to choose the area to save.</p>
+    <div class="row">
+      <span>Detail down to</span>
+      <span class="stepper">
+        <button id="sel-minus" type="button" aria-label="Less detail">−</button>
+        <output id="sel-max">z17</output>
+        <button id="sel-plus" type="button" aria-label="More detail">+</button>
+      </span>
+    </div>
+    <div class="row"><span id="sel-count">0 squares selected</span><span id="sel-estimate"></span></div>
+    <div class="sel-actions">
+      <button id="sel-cancel" type="button">Cancel</button>
+      <button id="sel-clear" type="button">Clear</button>
+      <button id="sel-download" class="primary" type="button">Download</button>
+    </div>
+  </div>
+
   <div id="attribution"></div>
   <div id="toast" role="status" aria-live="polite"></div>
 
@@ -65,6 +83,12 @@
       <button id="sheet-close" type="button">Done</button>
     </header>
     <div class="sheet-body">
+      <div class="group">
+        <h3>Pick an area</h3>
+        <button id="select-area-btn" class="wide primary" type="button">Select squares on map…</button>
+        <p class="footnote">Zoom out until you see the whole area you want, then tap the squares to save and choose how much detail to download.</p>
+      </div>
+
       <div class="group">
         <h3>Download visible area</h3>
         <div class="row">
