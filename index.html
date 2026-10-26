@@ -85,7 +85,14 @@
         <button id="sel-plus" type="button" aria-label="More detail">+</button>
       </span>
     </div>
-    <div class="row"><span id="sel-count">0 squares selected</span><span id="sel-estimate"></span></div>
+    <div class="row">
+      <span>Drag to</span>
+      <span class="segmented" role="group" aria-label="Drag mode">
+        <button id="sel-mode-move" type="button" aria-pressed="true">Move map</button>
+        <button id="sel-mode-paint" type="button" aria-pressed="false">Paint</button>
+      </span>
+    </div>
+    <div class="row"><span id="sel-count">0 squares</span><span id="sel-estimate"></span></div>
     <div class="sel-actions">
       <button id="sel-cancel" type="button">Cancel</button>
       <button id="sel-clear" type="button">Clear</button>
@@ -107,7 +114,7 @@
       <div class="group">
         <h3>Pick an area</h3>
         <button id="select-area-btn" class="wide primary" type="button">Select squares on map…</button>
-        <p class="footnote">Zoom out until you see the whole area you want, then tap squares (or "All") to pick it. You can make the squares bigger or smaller and choose how much detail to download.</p>
+        <p class="footnote">Shows a grid of 1 km × 1 km squares. Tap squares, drag across them in Paint mode, or use "All" for everything on screen, then choose how much detail to download.</p>
       </div>
 
       <div class="group">

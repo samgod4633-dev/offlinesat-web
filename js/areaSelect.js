@@ -1,16 +1,19 @@
 /* global L */
 import { EST_BYTES_PER_TILE, MAX_TILES, MAX_ZOOM } from './downloader.js';
-import { cellTileCount, cellTiles, latToTileY, lonToTileX, tileRanges } from './tileMath.js';
+import { latToV, lngToU, squareAt, squareSize, squareTileCount, squareTiles } from './tileMath.js';
 import { formatBytes, toast } from './ui.js';
 
 const $ = (id) => document.getElementById(id);
-const MIN_LEVEL = 2;
-const MAX_LEVEL = 16;
-const MAX_CELLS = 4000;
-const EARTH_CIRCUMFERENCE_M = 40_075_016;
+const SIZES_KM = [0.25, 0.5, 1, 2, 5, 10, 25, 50];
+const DEFAULT_SIZE_INDEX = SIZES_KM.indexOf(1);
+const MAX_CELLS = 20_000;
+const DEFAULT_DETAIL = 18;
 
-/** Draws the selection grid (cells at `state.level`) and fills selected cells, at any map zoom. */
-const SelectionGrid = L.GridLayer.extend({
+const formatKm = (km) => (km < 1 ? `${km * 1000} m` : `${km} km`);
+const formatArea = (km2) => `${km2 >= 10 ? Math.round(km2).toLocaleString() : km2.toFixed(2).replace(/\.?0+$/, '')} km²`;
+
+/** Draws the square grid and fills selected squares, at any map zoom. */
+const SquareGrid = L.GridLayer.extend({
   initialize(state, options) {
     this._state = state;
     L.GridLayer.prototype.initialize.call(this, options);
@@ -21,84 +24,103 @@ const SelectionGrid = L.GridLayer.extend({
     canvas.width = 256;
     canvas.height = 256;
     const ctx = canvas.getContext('2d');
-    const { level, cells } = this._state;
+    const { cs, cells } = this._state;
     const { x, y, z } = this._wrapCoords(coords);
-    ctx.fillStyle = 'rgba(10, 132, 255, 0.38)';
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-    ctx.lineWidth = 2;
+    const scale = 256 * 2 ** z; // canvas px per normalized unit
+    const u0 = x / 2 ** z;
+    const v0 = y / 2 ** z;
+    const u1 = (x + 1) / 2 ** z;
+    const v1 = (y + 1) / 2 ** z;
+    const cellPx = cs * scale;
 
-    if (z <= level) {
-      // This map tile holds n×n selection cells.
-      const n = 2 ** (level - z);
-      const px = 256 / n;
-      for (const key of cells) {
-        const [cx, cy] = key.split('/').map(Number);
-        const lx = cx - x * n;
-        const ly = cy - y * n;
-        if (lx >= 0 && lx < n && ly >= 0 && ly < n) {
-          ctx.fillRect(lx * px, ly * px, Math.max(px, 1), Math.max(px, 1));
-        }
-      }
-      if (px >= 6) {
-        ctx.beginPath();
-        for (let i = 0; i <= n; i++) {
-          const p = i * px;
-          ctx.moveTo(p, 0);
-          ctx.lineTo(p, 256);
-          ctx.moveTo(0, p);
-          ctx.lineTo(256, p);
-        }
-        ctx.stroke();
-      }
+    const iMin = Math.floor(u0 / cs);
+    const iMax = Math.floor(u1 / cs);
+    const jMin = Math.floor(v0 / cs);
+    const jMax = Math.floor(v1 / cs);
+
+    ctx.fillStyle = 'rgba(10, 132, 255, 0.4)';
+    const fill = (i, j) => {
+      const px = (i * cs - u0) * scale;
+      const py = (j * cs - v0) * scale;
+      ctx.fillRect(px, py, Math.max(cellPx, 1), Math.max(cellPx, 1));
+    };
+    if ((iMax - iMin + 1) * (jMax - jMin + 1) <= cells.size) {
+      for (let i = iMin; i <= iMax; i++) for (let j = jMin; j <= jMax; j++) if (cells.has(`${i}/${j}`)) fill(i, j);
     } else {
-      // This map tile is one piece of a larger cell; draw only the cell's outer edges.
-      const d = z - level;
-      const n = 2 ** d;
-      if (cells.has(`${x >> d}/${y >> d}`)) ctx.fillRect(0, 0, 256, 256);
+      for (const key of cells) {
+        const [i, j] = key.split('/').map(Number);
+        if (i >= iMin && i <= iMax && j >= jMin && j <= jMax) fill(i, j);
+      }
+    }
+
+    if (cellPx >= 6) {
+      ctx.strokeStyle = cellPx >= 30 ? 'rgba(255, 255, 255, 0.75)' : 'rgba(255, 255, 255, 0.45)';
+      ctx.lineWidth = cellPx >= 30 ? 1.5 : 1;
       ctx.beginPath();
-      if (x % n === 0) { ctx.moveTo(1, 0); ctx.lineTo(1, 256); }
-      if ((x + 1) % n === 0) { ctx.moveTo(255, 0); ctx.lineTo(255, 256); }
-      if (y % n === 0) { ctx.moveTo(0, 1); ctx.lineTo(256, 1); }
-      if ((y + 1) % n === 0) { ctx.moveTo(0, 255); ctx.lineTo(256, 255); }
+      for (let i = Math.ceil(u0 / cs); i * cs <= u1; i++) {
+        const px = (i * cs - u0) * scale;
+        ctx.moveTo(px, 0);
+        ctx.lineTo(px, 256);
+      }
+      for (let j = Math.ceil(v0 / cs); j * cs <= v1; j++) {
+        const py = (j * cs - v0) * scale;
+        ctx.moveTo(0, py);
+        ctx.lineTo(256, py);
+      }
       ctx.stroke();
     }
     return canvas;
   },
 });
 
-function formatDistance(meters) {
-  return meters >= 1000 ? `${(meters / 1000).toFixed(meters >= 10_000 ? 0 : 1)} km` : `${Math.round(meters)} m`;
-}
-
 /**
- * "Select area" mode: zoom out, tap squares (or All) to pick the area, set square size
- * and detail, then download every tile for those squares plus overview tiles above them.
+ * "Select area" mode: a grid of true ground-distance squares (1 km × 1 km by default).
+ * Tap squares, drag across them in Paint mode, or select everything on screen; choose the
+ * detail level; then download every tile covering those squares.
  */
 export function initAreaSelect({ map, runDownload, isDownloading }) {
-  const state = { level: 10, cells: new Set() };
-  const grid = new SelectionGrid(state, { zIndex: 10, maxZoom: 21, keepBuffer: 1 });
-  let maxZoom = 17;
+  const state = { cs: 0, cells: new Set() };
+  const grid = new SquareGrid(state, { zIndex: 10, maxZoom: 21, keepBuffer: 1 });
+  let sizeIndex = DEFAULT_SIZE_INDEX;
+  let refLat = 0;
+  let maxZoom = DEFAULT_DETAIL;
   let active = false;
+  let painting = false;
+
+  const toUV = (latLng) => {
+    const p = latLng.wrap();
+    return [lngToU(p.lng), latToV(p.lat)];
+  };
 
   function render() {
-    const count = cellTileCount(state.cells, state.level, maxZoom);
     const squares = state.cells.size;
-    const width = (EARTH_CIRCUMFERENCE_M * Math.cos((map.getCenter().lat * Math.PI) / 180)) / 2 ** state.level;
-    $('sel-size').textContent = `≈${formatDistance(width)}`;
+    const count = squares ? squareTileCount(state.cells, state.cs, maxZoom, MAX_TILES) : 0;
+    const km = SIZES_KM[sizeIndex];
+    $('sel-size').textContent = formatKm(km);
     $('sel-max').textContent = `z${maxZoom}`;
-    $('sel-count').textContent = `${squares.toLocaleString()} square${squares === 1 ? '' : 's'}`;
+    $('sel-count').textContent = `${squares.toLocaleString()} square${squares === 1 ? '' : 's'} · ${formatArea(km * km * squares)}`;
     const estimate = $('sel-estimate');
-    estimate.textContent = squares ? `${count.toLocaleString()} tiles · ~${formatBytes(count * EST_BYTES_PER_TILE)}` : '';
+    estimate.textContent = squares
+      ? (count > MAX_TILES ? `over ${MAX_TILES.toLocaleString()} tiles` : `${count.toLocaleString()} tiles · ~${formatBytes(count * EST_BYTES_PER_TILE)}`)
+      : '';
     estimate.classList.toggle('over', count > MAX_TILES);
-    $('sel-hint').textContent = count > MAX_TILES
-      ? `Over the ${MAX_TILES.toLocaleString()} tile limit: lower the detail or pick fewer squares.`
-      : 'Tap squares to choose the area to save. Pinch and drag to move around.';
-    $('sel-bigger').disabled = state.level <= MIN_LEVEL;
-    $('sel-smaller').disabled = state.level >= MAX_LEVEL;
-    $('sel-minus').disabled = maxZoom <= state.level;
+
+    const cellPx = state.cs * 256 * 2 ** map.getZoom();
+    let hint;
+    if (count > MAX_TILES) hint = 'Too many tiles: lower the detail or select fewer squares.';
+    else if (cellPx < 6) hint = `Zoom in to see the ${formatKm(km)} grid.`;
+    else if (painting) hint = 'Drag over squares to select them (start on a blue one to erase).';
+    else hint = `Squares are ${formatKm(km)} × ${formatKm(km)}. Tap to select, or switch to Paint.`;
+    $('sel-hint').textContent = hint;
+
+    $('sel-bigger').disabled = sizeIndex >= SIZES_KM.length - 1;
+    $('sel-smaller').disabled = sizeIndex <= 0;
+    $('sel-minus').disabled = maxZoom <= 10;
     $('sel-plus').disabled = maxZoom >= MAX_ZOOM;
     $('sel-download').disabled = squares === 0 || count > MAX_TILES || isDownloading();
     $('sel-clear').disabled = squares === 0;
+    $('sel-mode-move').setAttribute('aria-pressed', String(!painting));
+    $('sel-mode-paint').setAttribute('aria-pressed', String(painting));
   }
 
   function redraw() {
@@ -106,50 +128,62 @@ export function initAreaSelect({ map, runDownload, isDownloading }) {
     render();
   }
 
-  /** Changes square size, keeping the selected area: bigger → parent squares, smaller → 4 children each. */
-  function setLevel(level) {
-    if (level < MIN_LEVEL || level > MAX_LEVEL || level === state.level) return;
+  /** Changes square size, keeping the selected ground area covered. */
+  function setSize(index) {
+    if (index < 0 || index >= SIZES_KM.length || index === sizeIndex) return;
+    const cs = squareSize(SIZES_KM[index], refLat);
     const next = new Set();
     for (const key of state.cells) {
-      const [cx, cy] = key.split('/').map(Number);
-      if (level < state.level) {
-        const shift = state.level - level;
-        next.add(`${cx >> shift}/${cy >> shift}`);
-      } else {
-        for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) next.add(`${cx * 2 + dx}/${cy * 2 + dy}`);
-      }
+      const [i, j] = key.split('/').map(Number);
+      const iFrom = Math.floor((i * state.cs) / cs + 1e-9);
+      const iTo = Math.floor(((i + 1) * state.cs) / cs - 1e-9);
+      const jFrom = Math.floor((j * state.cs) / cs + 1e-9);
+      const jTo = Math.floor(((j + 1) * state.cs) / cs - 1e-9);
+      for (let a = iFrom; a <= iTo; a++) for (let b = jFrom; b <= jTo; b++) next.add(`${a}/${b}`);
+      if (next.size > MAX_CELLS) break;
     }
     if (next.size > MAX_CELLS) {
       toast('Too many squares at that size');
       return;
     }
-    state.level = level;
+    sizeIndex = index;
+    state.cs = cs;
     state.cells = next;
-    grid._state = state;
-    maxZoom = Math.max(maxZoom, level);
     redraw();
   }
 
   function selectAllVisible() {
     const b = map.getBounds();
-    const r = tileRanges({ north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest() }, state.level);
-    const added = (r.maxX - r.minX + 1) * (r.maxY - r.minY + 1);
-    if (state.cells.size + added > MAX_CELLS) {
-      toast('Too many squares – make them bigger first');
+    const [uW, vN] = toUV(b.getNorthWest());
+    const [uE, vS] = toUV(b.getSouthEast());
+    const iMin = Math.floor(uW / state.cs);
+    const iMax = Math.floor(Math.max(uE, uW) / state.cs);
+    const jMin = Math.floor(vN / state.cs);
+    const jMax = Math.floor(vS / state.cs);
+    if (state.cells.size + (iMax - iMin + 1) * (jMax - jMin + 1) > MAX_CELLS) {
+      toast('Too many squares on screen – zoom in or make squares bigger');
       return;
     }
-    for (let x = r.minX; x <= r.maxX; x++) {
-      for (let y = r.minY; y <= r.maxY; y++) state.cells.add(`${x}/${y}`);
-    }
+    for (let i = iMin; i <= iMax; i++) for (let j = jMin; j <= jMax; j++) state.cells.add(`${i}/${j}`);
     redraw();
   }
 
+  function setPainting(on) {
+    painting = on;
+    document.body.classList.toggle('painting', on);
+    if (on) map.dragging.disable();
+    else map.dragging.enable();
+    render();
+  }
+
   function enter() {
-    // One square per map tile at the current zoom: about 256 screen points wide.
-    state.level = Math.min(Math.max(Math.round(map.getZoom()), MIN_LEVEL), MAX_LEVEL);
+    // Squares measure exactly their size at the latitude where you start selecting.
+    refLat = map.getCenter().lat;
+    sizeIndex = DEFAULT_SIZE_INDEX;
+    state.cs = squareSize(SIZES_KM[sizeIndex], refLat);
     state.cells = new Set();
-    grid._state = state;
-    maxZoom = Math.min(Math.max(state.level + 5, 15), 17);
+    maxZoom = DEFAULT_DETAIL;
+    painting = false;
     grid.addTo(map);
     active = true;
     document.body.classList.add('selecting');
@@ -159,30 +193,76 @@ export function initAreaSelect({ map, runDownload, isDownloading }) {
 
   function exit() {
     active = false;
+    setPainting(false);
     map.removeLayer(grid);
     document.body.classList.remove('selecting');
     $('select-bar').hidden = true;
   }
 
+  // Tap to toggle (Move mode).
   map.on('click', (event) => {
-    if (!active) return;
-    const latLng = event.latlng.wrap();
-    const key = `${lonToTileX(latLng.lng, state.level)}/${latToTileY(latLng.lat, state.level)}`;
+    if (!active || painting) return;
+    const key = squareAt(...toUV(event.latlng), state.cs);
     if (state.cells.has(key)) state.cells.delete(key);
     else state.cells.add(key);
     redraw();
   });
-  map.on('moveend', () => { if (active) render(); });
+  map.on('zoomend moveend', () => { if (active) render(); });
 
-  $('sel-bigger').addEventListener('click', () => setLevel(state.level - 1));
-  $('sel-smaller').addEventListener('click', () => setLevel(state.level + 1));
-  $('sel-minus').addEventListener('click', () => { maxZoom = Math.max(maxZoom - 1, state.level); render(); });
+  // Drag to paint (Paint mode). Two fingers still pinch-zoom.
+  const container = map.getContainer();
+  const pointers = new Set();
+  let paintAdds = true;
+  let lastKey = null;
+
+  function paintAt(event) {
+    const latLng = map.containerPointToLatLng(map.mouseEventToContainerPoint(event));
+    const key = squareAt(...toUV(latLng), state.cs);
+    if (key === lastKey) return;
+    lastKey = key;
+    if (paintAdds) {
+      if (state.cells.size >= MAX_CELLS) return;
+      state.cells.add(key);
+    } else {
+      state.cells.delete(key);
+    }
+    redraw();
+  }
+
+  container.addEventListener('pointerdown', (event) => {
+    if (!active || !painting) return;
+    pointers.add(event.pointerId);
+    if (pointers.size > 1) {
+      lastKey = null;
+      return;
+    }
+    const latLng = map.containerPointToLatLng(map.mouseEventToContainerPoint(event));
+    paintAdds = !state.cells.has(squareAt(...toUV(latLng), state.cs));
+    lastKey = null;
+    paintAt(event);
+  });
+  container.addEventListener('pointermove', (event) => {
+    if (!active || !painting || pointers.size !== 1 || !pointers.has(event.pointerId)) return;
+    paintAt(event);
+  });
+  const endPointer = (event) => {
+    pointers.delete(event.pointerId);
+    lastKey = null;
+  };
+  container.addEventListener('pointerup', endPointer);
+  container.addEventListener('pointercancel', endPointer);
+
+  $('sel-mode-move').addEventListener('click', () => setPainting(false));
+  $('sel-mode-paint').addEventListener('click', () => setPainting(true));
+  $('sel-bigger').addEventListener('click', () => setSize(sizeIndex + 1));
+  $('sel-smaller').addEventListener('click', () => setSize(sizeIndex - 1));
+  $('sel-minus').addEventListener('click', () => { maxZoom = Math.max(maxZoom - 1, 10); render(); });
   $('sel-plus').addEventListener('click', () => { maxZoom = Math.min(maxZoom + 1, MAX_ZOOM); render(); });
   $('sel-clear').addEventListener('click', () => { state.cells.clear(); redraw(); });
   $('sel-all').addEventListener('click', selectAllVisible);
   $('sel-cancel').addEventListener('click', exit);
   $('sel-download').addEventListener('click', async () => {
-    if (await runDownload(cellTiles(state.cells, state.level, maxZoom))) exit();
+    if (await runDownload(squareTiles(state.cells, state.cs, maxZoom))) exit();
   });
 
   return { enter, exit };

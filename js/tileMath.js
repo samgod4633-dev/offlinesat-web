@@ -39,50 +39,71 @@ export function tileCount(bounds, minZoom, maxZoom) {
   return total;
 }
 
-// ---- Hand-picked areas: a set of "cx/cy" cells at one selection zoom level ----
+// ---- Ground-distance squares (e.g. 1 km × 1 km) for hand-picked areas ----
+//
+// Squares live in normalized Web Mercator space (u, v ∈ [0, 1], v down from the north edge).
+// Mercator is conformal, so a square there is a true square on the ground; its side `cs` is
+// chosen so it measures exactly `km` at a reference latitude (within ~1% over 100 km north/south).
 
-const parseCells = (cells) => [...cells].map((key) => key.split('/').map(Number));
+export const EARTH_CIRCUMFERENCE_M = 40_075_016.686;
 
-/** Ancestors of the cells, up to 6 levels above, so zooming out over the area still shows imagery. */
-function overviewTiles(parsed, level) {
-  const seen = new Set();
-  const tiles = [];
-  for (let z = Math.max(0, level - 6); z < level; z++) {
-    const shift = level - z;
-    for (const [cx, cy] of parsed) {
-      const x = cx >> shift;
-      const y = cy >> shift;
-      const key = tileKey(z, x, y);
-      if (!seen.has(key)) {
-        seen.add(key);
-        tiles.push({ z, x, y });
-      }
-    }
-  }
-  return tiles;
+export const lngToU = (lng) => (lng + 180) / 360;
+
+export function latToV(lat) {
+  const rad = (Math.min(Math.max(lat, -MAX_LATITUDE), MAX_LATITUDE) * Math.PI) / 180;
+  return (1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2;
 }
 
-export function cellTileCount(cells, level, maxZoom) {
-  if (!cells.size) return 0;
-  let perCell = 0;
-  for (let z = level; z <= maxZoom; z++) perCell += 4 ** (z - level);
-  return overviewTiles(parseCells(cells), level).length + cells.size * perCell;
+/** Side length, in normalized units, of a square `km` wide on the ground at latitude `lat`. */
+export function squareSize(km, lat) {
+  return (km * 1000) / (EARTH_CIRCUMFERENCE_M * Math.cos((lat * Math.PI) / 180));
 }
 
-/** Every tile needed to show the selected cells from overview zooms down to maxZoom. */
-export function cellTiles(cells, level, maxZoom) {
-  const parsed = parseCells(cells);
-  const tiles = overviewTiles(parsed, level);
-  for (let z = level; z <= maxZoom; z++) {
-    const n = 2 ** (z - level);
-    for (const [cx, cy] of parsed) {
-      for (let dx = 0; dx < n; dx++) {
-        for (let dy = 0; dy < n; dy++) {
-          tiles.push({ z, x: cx * n + dx, y: cy * n + dy });
+/** Square key "i/j" containing the point (u, v). */
+export const squareAt = (u, v, cs) => `${Math.floor(u / cs)}/${Math.floor(v / cs)}`;
+
+const OVERVIEW_MIN_ZOOM = 5;
+const EDGE = 1e-12;
+
+/**
+ * Calls visit(z, x, y) once per tile needed to show the squares from overview zoom 5 down
+ * to maxZoom. Stops early (returning false) once more than `limit` tiles have been visited.
+ */
+function forEachSquareTile(cells, cs, maxZoom, limit, visit) {
+  const parsed = [...cells].map((key) => key.split('/').map(Number));
+  let visited = 0;
+  for (let z = OVERVIEW_MIN_ZOOM; z <= maxZoom; z++) {
+    const n = 2 ** z;
+    const seen = new Set();
+    for (const [i, j] of parsed) {
+      const minX = Math.max(Math.floor(i * cs * n), 0);
+      const maxX = Math.min(Math.floor(((i + 1) * cs - EDGE) * n), n - 1);
+      const minY = Math.max(Math.floor(j * cs * n), 0);
+      const maxY = Math.min(Math.floor(((j + 1) * cs - EDGE) * n), n - 1);
+      for (let x = minX; x <= maxX; x++) {
+        for (let y = minY; y <= maxY; y++) {
+          const key = x * n + y;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          visit(z, x, y);
+          if (++visited > limit) return false;
         }
       }
     }
   }
+  return true;
+}
+
+/** Number of tiles for the squares, capped at limit + 1 so huge selections stay fast. */
+export function squareTileCount(cells, cs, maxZoom, limit) {
+  let count = 0;
+  forEachSquareTile(cells, cs, maxZoom, limit, () => { count++; });
+  return count;
+}
+
+export function squareTiles(cells, cs, maxZoom) {
+  const tiles = [];
+  forEachSquareTile(cells, cs, maxZoom, Infinity, (z, x, y) => tiles.push({ z, x, y }));
   return tiles;
 }
 

@@ -226,6 +226,24 @@ select {
 #sel-estimate.over { color: var(--poor); }
 #sel-max { min-width: 36px; }
 #sel-size { min-width: 64px; }
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.segmented button {
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  padding: 6px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.segmented button[aria-pressed="true"] { background: var(--blue); color: #fff; }
+#select-bar .row { min-height: 40px; }
+body.selecting.painting #map { cursor: crosshair; }
 .sel-actions { display: flex; gap: 6px; margin-top: 10px; }
 .sel-actions button {
   flex: 1;
