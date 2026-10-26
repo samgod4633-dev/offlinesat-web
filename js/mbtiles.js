@@ -1,4 +1,5 @@
 /* global initSqlJs */
+import { IMPORT_PREFIX } from './settings.js';
 import { tileKey } from './tileMath.js';
 import { tileStore } from './tileStore.js';
 
@@ -60,7 +61,7 @@ export async function importMBTiles(file, onProgress) {
       while (statement.step()) {
         const [z, x, row, data] = statement.get();
         if (!data) continue;
-        batch.push([tileKey(z, x, 2 ** z - 1 - row), data.slice().buffer]);
+        batch.push([IMPORT_PREFIX + tileKey(z, x, 2 ** z - 1 - row), data.slice().buffer]);
         if (batch.length >= BATCH_SIZE) {
           await tileStore.putMany(batch);
           done += batch.length;

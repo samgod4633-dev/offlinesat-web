@@ -1,28 +1,23 @@
 /* global L */
 import { settings } from './settings.js';
-import { tileKey } from './tileMath.js';
 import { tileStore } from './tileStore.js';
 
-async function localTile(z, x, y) {
+async function firstStored(keys) {
   try {
-    return await tileStore.get(tileKey(z, x, y));
+    return await tileStore.getFirst(keys);
   } catch {
     return undefined;
   }
 }
 
-/** Fetches one tile from the configured source. Rejects on HTTP errors, non-images and timeouts. */
-export async function fetchTile(z, x, y, { signal, timeoutMs = 8000 } = {}) {
+/** Fetches one tile image. Rejects on HTTP errors, non-images and timeouts. */
+export async function fetchTile(url, { signal, timeoutMs = 8000 } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const forwardAbort = () => controller.abort();
   signal?.addEventListener('abort', forwardAbort);
   try {
-    const response = await fetch(settings.tileUrl(z, x, y), {
-      signal: controller.signal,
-      mode: 'cors',
-      credentials: 'omit',
-    });
+    const response = await fetch(url, { signal: controller.signal, mode: 'cors', credentials: 'omit' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const type = response.headers.get('content-type') || '';
     if (!type.startsWith('image/')) throw new Error('Tile server did not return an image');
@@ -37,11 +32,11 @@ export async function fetchTile(z, x, y, { signal, timeoutMs = 8000 } = {}) {
  * Crops and upscales the nearest saved ancestor (up to 4 levels up), so imagery
  * saved to z17 still shows something useful when zoomed to z19+ offline.
  */
-async function overzoomedTile(z, x, y) {
+async function overzoomedTile(source, z, x, y) {
   for (let dz = 1; dz <= 4 && z - dz >= 0; dz++) {
     const px = x >> dz;
     const py = y >> dz;
-    const data = await localTile(z - dz, px, py);
+    const data = await firstStored(source.lookupKeys(z - dz, px, py));
     if (!data) continue;
 
     let bitmap;
@@ -63,21 +58,28 @@ async function overzoomedTile(z, x, y) {
   return null;
 }
 
-/** Saved tile → network (saved if enabled) → enlarged ancestor → empty. */
+/**
+ * This source's saved tile → network (saved if enabled) → any saved tile (imports,
+ * other sources) → enlarged ancestor → empty.
+ */
 async function resolveTile(z, x, y) {
-  const local = await localTile(z, x, y);
-  if (local) return new Blob([local]);
+  const source = settings.source();
+  const own = await firstStored([source.storageKey(z, x, y)]);
+  if (own) return new Blob([own]);
 
   if (navigator.onLine) {
     try {
-      const data = await fetchTile(z, x, y);
-      if (settings.saveWhileBrowsing) tileStore.put(tileKey(z, x, y), data).catch(() => {});
+      const data = await fetchTile(source.tileUrl(z, x, y));
+      if (settings.saveWhileBrowsing) tileStore.put(source.storageKey(z, x, y), data).catch(() => {});
       return new Blob([data]);
     } catch {
       // fall through to offline options
     }
   }
-  return overzoomedTile(z, x, y);
+
+  const any = await firstStored(source.lookupKeys(z, x, y));
+  if (any) return new Blob([any]);
+  return overzoomedTile(source, z, x, y);
 }
 
 export const OfflineTileLayer = L.GridLayer.extend({

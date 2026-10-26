@@ -26,7 +26,14 @@
       <span class="st-row muted"><span id="st-zoom"></span><span id="st-net"></span></span>
     </button>
     <div id="banner" class="card" hidden>
-      <span>Location is blocked. On iPhone: Settings › Privacy &amp; Security › Location Services › Safari Websites › While Using the App.</span>
+      <strong>Location is blocked</strong>
+      <span>On iPhone, check all three:</span>
+      <ol>
+        <li>Settings › Privacy &amp; Security › <b>Location Services</b> is on</li>
+        <li>…› Location Services › <b>Safari Websites</b> › While Using the App, with <b>Precise Location</b> on</li>
+        <li>Settings › Apps › Safari › <b>Location</b> › Ask or Allow</li>
+      </ol>
+      <span>Then close OfflineSat fully (swipe it away) and reopen it.</span>
       <button id="banner-retry" type="button">Try again</button>
     </div>
     <button id="pill" class="card" type="button" hidden>
@@ -50,13 +57,26 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M5 12h14"/></svg>
       </button>
     </div>
+    <button id="btn-layers" class="ctl" type="button" aria-label="Imagery source" aria-expanded="false">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3 2 8l10 5 10-5z"/><path d="m2 13 10 5 10-5"/></svg>
+    </button>
     <button id="btn-offline" class="ctl" type="button" aria-label="Offline maps">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M4 17v3h16v-3"/></svg>
     </button>
   </div>
 
+  <div id="layers-menu" class="card" role="menu" hidden></div>
+
   <div id="select-bar" class="card" hidden>
     <p id="sel-hint">Tap squares to choose the area to save.</p>
+    <div class="row">
+      <span>Square size</span>
+      <span class="stepper">
+        <button id="sel-smaller" type="button" aria-label="Smaller squares">−</button>
+        <output id="sel-size">—</output>
+        <button id="sel-bigger" type="button" aria-label="Bigger squares">+</button>
+      </span>
+    </div>
     <div class="row">
       <span>Detail down to</span>
       <span class="stepper">
@@ -69,6 +89,7 @@
     <div class="sel-actions">
       <button id="sel-cancel" type="button">Cancel</button>
       <button id="sel-clear" type="button">Clear</button>
+      <button id="sel-all" type="button">All</button>
       <button id="sel-download" class="primary" type="button">Download</button>
     </div>
   </div>
@@ -86,7 +107,7 @@
       <div class="group">
         <h3>Pick an area</h3>
         <button id="select-area-btn" class="wide primary" type="button">Select squares on map…</button>
-        <p class="footnote">Zoom out until you see the whole area you want, then tap the squares to save and choose how much detail to download.</p>
+        <p class="footnote">Zoom out until you see the whole area you want, then tap squares (or "All") to pick it. You can make the squares bigger or smaller and choose how much detail to download.</p>
       </div>
 
       <div class="group">
@@ -115,7 +136,7 @@
         <button id="dl-start" class="wide primary" type="button">Download visible area</button>
         <button id="dl-cancel" class="wide danger" type="button" hidden>Cancel download</button>
         <p id="dl-result" class="muted small"></p>
-        <p class="footnote">Use Wi-Fi: big areas can use a lot of data. Keep the app open until it finishes. Limit 25,000 tiles per download; tiles you already have are skipped.</p>
+        <p class="footnote">Use Wi-Fi: big areas can use a lot of data. Keep the app open on screen until it finishes. Up to 200,000 tiles (~4 GB) per download; tiles you already have are skipped.</p>
       </div>
 
       <div class="group">
@@ -129,14 +150,21 @@
       </div>
 
       <div class="group">
-        <h3>Tile source</h3>
-        <textarea id="template" rows="3" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Tile URL template"></textarea>
-        <button id="reset-template" class="wide" type="button">Reset to Esri World Imagery</button>
+        <h3>Imagery</h3>
+        <label class="row">
+          <span>Source</span>
+          <select id="source-select" aria-label="Imagery source"></select>
+        </label>
+        <p id="source-note" class="muted small"></p>
+        <div id="custom-source" hidden>
+          <textarea id="template" rows="3" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Custom tile URL template"></textarea>
+          <p class="footnote">Placeholders: {z} {x} {y}, {-y} (TMS), {q} (quadkey), {s} (subdomain).</p>
+        </div>
         <label class="row">
           <span>Save tiles while browsing</span>
           <input id="save-browsing" type="checkbox">
         </label>
-        <p class="footnote">Placeholders: {z} {x} {y}, or {-y} for TMS. Check your imagery provider's terms before saving tiles for offline use.</p>
+        <p class="footnote">Each source keeps its own saved tiles. Offline, the app falls back to any saved imagery for the spot. Google and Bing don't officially allow saving their tiles; they could stop serving them at any time.</p>
       </div>
     </div>
   </section>

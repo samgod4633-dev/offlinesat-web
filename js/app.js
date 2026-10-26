@@ -2,7 +2,7 @@
 import { initAreaSelect } from './areaSelect.js';
 import { LocationTracker } from './location.js';
 import { OfflineTileLayer } from './offlineLayer.js';
-import { settings } from './settings.js';
+import { settings, SOURCES } from './settings.js';
 import { initOfflineSheet, toast } from './ui.js';
 
 const $ = (id) => document.getElementById(id);
@@ -91,11 +91,11 @@ tracker.addEventListener('error', () => {
   renderStatus();
 });
 
-$('banner-retry').addEventListener('click', () => tracker.start());
+$('banner-retry').addEventListener('click', () => tracker.locateOnce());
 
 // iOS can stop delivering updates after the app was in the background.
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) tracker.start();
+  if (!document.hidden && !tracker.denied) tracker.start();
 });
 
 // ---------- Status readout ----------
@@ -119,11 +119,12 @@ function renderStatus() {
     $('st-alt').textContent = c.altitude == null
       ? 'ALT —'
       : `ALT ${Math.round(c.altitude)} m${c.altitudeAccuracy != null ? ` ±${Math.round(c.altitudeAccuracy)}` : ''}`;
-    acc.textContent = `±${Math.round(c.accuracy)} m`;
+    // Accuracy over 1 km almost always means Precise Location is switched off for the app.
+    acc.textContent = c.accuracy > 1000 ? `±${(c.accuracy / 1000).toFixed(1)} km (Precise off?)` : `±${Math.round(c.accuracy)} m`;
     acc.className = accuracyClass(c.accuracy);
   } else {
-    $('st-lat').textContent = tracker.denied ? 'Location blocked' : 'Waiting for GPS…';
-    $('st-lon').textContent = '';
+    $('st-lat').textContent = tracker.problem || 'Waiting for GPS…';
+    $('st-lon').textContent = tracker.denied ? '' : 'Tap ⌖ to locate';
     $('st-alt').textContent = '';
     acc.textContent = '';
   }
@@ -141,7 +142,10 @@ window.addEventListener('offline', renderMapStatus);
 
 $('status').addEventListener('click', async () => {
   const latLng = currentLatLng();
-  if (!latLng) return;
+  if (!latLng) {
+    tracker.locateOnce();
+    return;
+  }
   try {
     await navigator.clipboard.writeText(`${latLng[0].toFixed(6)}, ${latLng[1].toFixed(6)}`);
     toast('Coordinates copied');
@@ -170,7 +174,7 @@ $('btn-follow').addEventListener('click', () => {
     $('banner').hidden = false;
     return;
   }
-  if (!tracker.position) tracker.start();
+  if (!tracker.position) tracker.locateOnce();
   setFollowing(!following);
 });
 
@@ -178,20 +182,63 @@ $('btn-center').addEventListener('click', () => {
   const latLng = currentLatLng();
   if (latLng) {
     map.setView(latLng, Math.max(map.getZoom(), FOLLOW_ZOOM));
-  } else {
-    tracker.start();
-    toast(tracker.denied ? 'Location is blocked' : 'Waiting for GPS…');
+    return;
   }
+  // Called from a tap so iOS shows the permission prompt if it hasn't yet.
+  tracker.locateOnce();
+  if (tracker.denied) $('banner').hidden = false;
+  else toast('Finding your location…');
 });
 
 $('btn-zoom-in').addEventListener('click', () => map.zoomIn());
 $('btn-zoom-out').addEventListener('click', () => map.zoomOut());
 
-// ---------- Offline sheet ----------
+// ---------- Imagery source ----------
 
 function renderAttribution() {
-  $('attribution').textContent = settings.attribution;
+  $('attribution').textContent = settings.source().attribution || '';
 }
+
+function applySource(id) {
+  sheet.setSource(id);
+  toast(settings.source().name);
+}
+
+function renderLayersMenu() {
+  const menu = $('layers-menu');
+  menu.replaceChildren(...SOURCES.map((source) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.setAttribute('role', 'menuitemradio');
+    button.setAttribute('aria-checked', String(settings.sourceId === source.id));
+    button.innerHTML = '<span class="name"></span><span class="note"></span>';
+    button.querySelector('.name').textContent = source.name;
+    button.querySelector('.note').textContent = source.note;
+    button.addEventListener('click', () => {
+      applySource(source.id);
+      toggleLayersMenu(false);
+    });
+    return button;
+  }));
+}
+
+function toggleLayersMenu(open) {
+  const menu = $('layers-menu');
+  const show = open ?? menu.hidden;
+  if (show) renderLayersMenu();
+  menu.hidden = !show;
+  $('btn-layers').setAttribute('aria-expanded', String(show));
+}
+
+$('btn-layers').addEventListener('click', (event) => {
+  event.stopPropagation();
+  toggleLayersMenu();
+});
+document.addEventListener('click', (event) => {
+  if (!$('layers-menu').hidden && !$('layers-menu').contains(event.target)) toggleLayersMenu(false);
+});
+
+// ---------- Offline sheet & area selection ----------
 
 const sheet = initOfflineSheet({
   map,
@@ -201,11 +248,11 @@ const sheet = initOfflineSheet({
     tileLayer.redraw();
   },
   onSelectArea: () => areaSelect.enter(),
-  onDownloadProgress: (fraction) => {
+  onDownloadProgress: (fraction, eta) => {
     $('pill').hidden = fraction == null;
     if (fraction != null) {
       $('pill-bar').value = fraction;
-      $('pill-text').textContent = `Saving tiles ${Math.round(fraction * 100)}%`;
+      $('pill-text').textContent = `Saving ${Math.round(fraction * 100)}%${eta ? ` · ${eta}` : ''}`;
     }
   },
 });
@@ -227,5 +274,13 @@ tracker.start();
 navigator.storage?.persist?.().catch(() => {});
 
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+  // When a new version takes over, reload once so you're never stuck on the old one.
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading || sheet.isDownloading()) return;
+    reloading = true;
+    window.location.reload();
+  });
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
 }

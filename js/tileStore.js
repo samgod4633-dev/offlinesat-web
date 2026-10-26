@@ -38,6 +38,14 @@ async function transaction(mode, work) {
 
 export const tileStore = {
   get: (key) => transaction('readonly', (store) => store.get(key)),
+  /** First stored value among `keys`, in order, using one transaction. */
+  getFirst: async (keys) => {
+    const requests = await transaction('readonly', (store) => keys.map((key) => store.get(key)));
+    for (const request of requests) {
+      if (request.result !== undefined) return request.result;
+    }
+    return undefined;
+  },
   has: async (key) => (await transaction('readonly', (store) => store.count(key))) > 0,
   put: (key, data) => transaction('readwrite', (store) => { store.put(data, key); }),
   putMany: (entries) => transaction('readwrite', (store) => {
