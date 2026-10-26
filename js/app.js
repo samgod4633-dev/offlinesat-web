@@ -86,12 +86,15 @@ tracker.addEventListener('update', () => {
   renderStatus();
 });
 
+let bannerDismissed = false;
+
 tracker.addEventListener('error', () => {
-  $('banner').hidden = !tracker.denied;
+  $('banner').hidden = !tracker.denied || bannerDismissed;
   renderStatus();
 });
 
 $('banner-retry').addEventListener('click', () => tracker.locateOnce());
+$('banner-hide').addEventListener('click', () => { bannerDismissed = true; $('banner').hidden = true; });
 
 // iOS can stop delivering updates after the app was in the background.
 document.addEventListener('visibilitychange', () => {

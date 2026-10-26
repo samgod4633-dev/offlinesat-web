@@ -93,6 +93,9 @@ button { font: inherit; color: inherit; }
   max-width: 340px;
 }
 #banner ol { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.banner-actions { display: flex; gap: 8px; }
+#banner button.secondary { background: rgba(255, 255, 255, 0.14); }
+body.selecting #banner { display: none !important; }
 #banner button {
   align-self: flex-start;
   background: var(--blue);

@@ -1,6 +1,6 @@
 // App-shell cache so OfflineSat opens with no signal. Map tiles are NOT handled here;
 // they live in IndexedDB (see js/tileStore.js). Bump VERSION when shipping changes.
-const VERSION = 'v4';
+const VERSION = 'v5';
 const CACHE = `offlinesat-${VERSION}`;
 
 const APP_FILES = [
